@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vector Clocks & Causality PoC</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+    <h1>Vector Clocks & Kausalität – PoC</h1>
+    <p>
+        Interaktive Simulation für Lamport Clocks, Vector Clocks und
+        Dynamo-inspirierte Konflikterkennung.
+    </p>
+</header>
+
+<main>
+    <section class="panel controls">
+        <h2>Steuerung</h2>
+
+        <div class="control-row">
+            <label for="nodeCount">Anzahl Nodes:</label>
+            <select id="nodeCount">
+                <option value="3" selected>3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+            </select>
+            <button id="initBtn">Neu initialisieren</button>
+        </div>
+
+        <div class="control-row">
+            <label for="localNode">Lokales Event auf:</label>
+            <select id="localNode"></select>
+            <button id="localEventBtn">Lokales Event auslösen</button>
+        </div>
+
+        <div class="control-row">
+            <label for="sendFrom">Nachricht von:</label>
+            <select id="sendFrom"></select>
+            <label for="sendTo">an:</label>
+            <select id="sendTo"></select>
+            <input id="payloadInput" type="text" placeholder="Payload" value="hello" />
+            <button id="sendBtn">Nachricht senden</button>
+        </div>
+
+        <div class="control-row">
+            <button id="deliverNextBtn">Nächste Nachricht zustellen</button>
+            <button id="randomScenarioBtn">Zufalls-Event</button>
+            <button id="partitionScenarioBtn">Dynamo-Konflikt-Szenario</button>
+            <button id="resetBtn">Reset</button>
+        </div>
+    </section>
+
+    <section class="panel">
+        <h2>Nodes</h2>
+        <div id="nodesContainer" class="nodes-grid"></div>
+    </section>
+
+    <section class="panel">
+        <h2>Nachrichten im Netzwerk</h2>
+        <div id="networkQueue" class="queue"></div>
+    </section>
+
+    <section class="panel">
+        <h2>Event-Log</h2>
+        <div id="eventLog" class="log"></div>
+    </section>
+
+    <section class="panel">
+        <h2>Event-Vergleich</h2>
+        <div class="compare-row">
+            <label for="compareA">Event A:</label>
+            <select id="compareA"></select>
+            <label for="compareB">Event B:</label>
+            <select id="compareB"></select>
+            <button id="compareBtn">Vergleichen</button>
+        </div>
+        <div id="compareResult" class="result-box"></div>
+    </section>
+
+    <section class="panel">
+        <h2>Dynamo-inspirierte Versionierung</h2>
+        <div class="control-row">
+            <label for="dynamoNode">Write auf Node:</label>
+            <select id="dynamoNode"></select>
+            <label for="dynamoValue">Wert:</label>
+            <input id="dynamoValue" type="text" placeholder="z. B. rot" />
+            <button id="dynamoWriteBtn">Write ausführen</button>
+        </div>
+        <div class="control-row">
+            <button id="dynamoSyncBtn">Versionen zusammenführen</button>
+        </div>
+        <div id="dynamoView" class="dynamo-box"></div>
+    </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
