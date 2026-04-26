@@ -1,40 +1,57 @@
 # Vector Clocks & Kausalität – PoC
 
-Dieser Proof of Concept demonstriert zentrale Konzepte verteilter Systeme:
+Interaktive Web-Simulation für:
 
 - Lamport Clocks
 - Vector Clocks
 - Kausale Ordnung vs. totale Ordnung
-- Dynamo-inspirierte Versionierung und Konflikterkennung
+- Dynamo-inspirierte Konflikterkennung mit Siblings
 
-## Start
+## Start in IntelliJ
 
-Einfach `index.html` im Browser öffnen.
+1. Ordner in IntelliJ öffnen
+2. Datei `index.html` öffnen
+3. Im Browser starten
 
-## Funktionen
+Falls IntelliJ keinen direkten Browser-Start anbietet:
+- `index.html` per Doppelklick im Browser öffnen
 
-- Lokale Events auf einzelnen Nodes
+## Features
+
+- Mehrere Nodes
+- Lokale Events
 - Nachrichtenversand zwischen Nodes
-- Zustellung von Nachrichten über eine Warteschlange
-- Anzeige von Lamport- und Vector-Timestamps
-- Vergleich zweier Events
-- Vereinfachtes Dynamo-Szenario mit konkurrierenden Versionen
+- Canvas-Netzwerkvisualisierung
+- Lamport- und Vector-Clocks pro Node
+- Event-Vergleich: happened-before vs. concurrent
+- Dynamo-Konflikt-Szenario
+- Anzeige konkurrierender Sibling-Versionen
 
-## Ziel
+## Gute Demo-Szenarien
 
-Der PoC zeigt:
+### 1. Concurrent Events
+- Button `Concurrent-Szenario`
+- Zwei Nodes erzeugen lokale Events ohne Kommunikation
+- Vector Clocks zeigen: concurrent
 
-- Lamport Clocks erzeugen eine logische Ordnung, können aber konkurrierende Events nicht sicher erkennen
-- Vector Clocks können kausale Beziehungen und Konkurrenz modellieren
-- Dynamo-artige Versionsverwaltung kann konkurrierende Writes sichtbar machen
+### 2. Nachrichtenaustausch
+- Nachricht senden
+- Danach zustellen
+- Receiver übernimmt kausale Information
+
+### 3. Dynamo-Konflikt
+- Button `Dynamo-Konflikt`
+- Zwei unabhängige Writes auf verschiedenen Nodes
+- Beide Versionen bleiben als Siblings erhalten
 
 ## Vereinfachungen
 
-Dieser PoC ist bewusst vereinfacht und implementiert nicht:
+Der PoC simuliert Konzepte und ist kein vollständiges verteiltes Datenbanksystem.
 
-- echte Netzwerkkommunikation
-- persistente Speicherung
+Nicht enthalten:
+- echter Netzwerkstack
+- Persistenz
 - Quorum Reads/Writes
 - Membership Changes
 - Failure Detection
-- vollständige Dynamo-Mechanismen wie Hinted Handoff oder Merkle Trees
+- vollständige Dynamo-Features wie Hinted Handoff oder Merkle Trees

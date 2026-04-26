@@ -26,7 +26,8 @@ class NodeState {
     this.lamport = 0;
     this.vector = new Array(totalNodes).fill(0);
     this.log = [];
-    this.versions = []; // Dynamo-artige Objektversionen
+    this.versions = [];
+    this.position = { x: 0, y: 0 };
   }
 }
 
@@ -47,10 +48,14 @@ const dynamoNodeSelect = document.getElementById("dynamoNode");
 const dynamoValueInput = document.getElementById("dynamoValue");
 
 const nodesContainer = document.getElementById("nodesContainer");
-const networkQueueDiv = document.getElementById("networkQueue");
 const eventLogDiv = document.getElementById("eventLog");
 const compareResultDiv = document.getElementById("compareResult");
 const dynamoViewDiv = document.getElementById("dynamoView");
+const dynamoSummaryDiv = document.getElementById("dynamoSummary");
+const queueInfoDiv = document.getElementById("queueInfo");
+
+const canvas = document.getElementById("networkCanvas");
+const ctx = canvas.getContext("2d");
 
 document.getElementById("initBtn").addEventListener("click", initialize);
 document.getElementById("localEventBtn").addEventListener("click", handleLocalEvent);
@@ -62,6 +67,8 @@ document.getElementById("resetBtn").addEventListener("click", initialize);
 document.getElementById("dynamoWriteBtn").addEventListener("click", handleDynamoWrite);
 document.getElementById("dynamoSyncBtn").addEventListener("click", handleDynamoSync);
 document.getElementById("partitionScenarioBtn").addEventListener("click", runDynamoConflictScenario);
+document.getElementById("scenarioConcurrencyBtn").addEventListener("click", runConcurrentEventsScenario);
+window.addEventListener("resize", renderCanvas);
 
 function initialize() {
   const nodeCount = parseInt(nodeCountSelect.value, 10);
@@ -70,11 +77,17 @@ function initialize() {
   globalEventLog = [];
   nextEventId = 1;
   nextMessageId = 1;
+  compareResultDiv.innerHTML = "";
+  dynamoSummaryDiv.innerHTML = explanationBanner(
+    "Dynamo-Versionierung",
+    "Mehrere konkurrierende Writes bleiben als Siblings erhalten, wenn ihre Vector Clocks nicht vergleichbar sind."
+  );
 
   for (let i = 0; i < nodeCount; i++) {
     nodes.push(new NodeState(i, nodeCount));
   }
 
+  computeNodePositions();
   fillNodeSelectors();
   renderAll();
 }
@@ -91,7 +104,10 @@ function fillNodeSelectors() {
     });
   });
 
-  sendToSelect.selectedIndex = nodes.length > 1 ? 1 : 0;
+  if (nodes.length > 1) {
+    sendToSelect.selectedIndex = 1;
+  }
+
   renderCompareSelectors();
 }
 
@@ -100,7 +116,7 @@ function renderCompareSelectors() {
   compareBSelect.innerHTML = "";
 
   globalEventLog.forEach(event => {
-    const label = `#${event.id} | Node ${event.nodeId} | ${event.type} | L=${event.lamport} | V=[${event.vector.join(",")}]`;
+    const label = `#${event.id} | N${event.nodeId} | ${event.type} | L=${event.lamport} | V=[${event.vector.join(",")}]`;
 
     const optA = document.createElement("option");
     optA.value = event.id;
@@ -118,6 +134,22 @@ function renderCompareSelectors() {
   }
 }
 
+function computeNodePositions() {
+  const width = canvas.width;
+  const height = canvas.height;
+  const cx = width / 2;
+  const cy = height / 2 + 8;
+  const radius = Math.min(width, height) * 0.33;
+
+  nodes.forEach((node, index) => {
+    const angle = (2 * Math.PI * index) / nodes.length - Math.PI / 2;
+    node.position = {
+      x: cx + radius * Math.cos(angle),
+      y: cy + radius * Math.sin(angle)
+    };
+  });
+}
+
 function logEvent(node, type, details = {}) {
   const event = new EventRecord(
     nextEventId++,
@@ -132,11 +164,15 @@ function logEvent(node, type, details = {}) {
   renderCompareSelectors();
 }
 
-function handleLocalEvent() {
-  const node = nodes[parseInt(localNodeSelect.value, 10)];
+function doLocalEvent(node, type = "local") {
   node.lamport += 1;
   node.vector[node.id] += 1;
-  logEvent(node, "local");
+  logEvent(node, type);
+}
+
+function handleLocalEvent() {
+  const node = nodes[parseInt(localNodeSelect.value, 10)];
+  doLocalEvent(node, "local");
   renderAll();
 }
 
@@ -213,44 +249,57 @@ function compareSelectedEvents() {
   const b = globalEventLog.find(e => e.id === idB);
 
   if (!a || !b) {
-    compareResultDiv.textContent = "Bitte zwei Events auswählen.";
+    compareResultDiv.innerHTML = explanationBanner("Fehlende Auswahl", "Bitte zwei Events auswählen.");
     return;
   }
 
-  const vectorRelation = compareVectors(a.vector, b.vector);
+  const relation = compareVectors(a.vector, b.vector);
 
-  let lamportInterpretation = "";
+  let lamportText;
   if (a.lamport < b.lamport) {
-    lamportInterpretation = "Lamport: A liegt vor B.";
+    lamportText = "Lamport ordnet A vor B.";
   } else if (a.lamport > b.lamport) {
-    lamportInterpretation = "Lamport: B liegt vor A.";
+    lamportText = "Lamport ordnet B vor A.";
   } else {
-    lamportInterpretation = "Lamport: gleiche Zeitstempel.";
+    lamportText = "Lamport sieht identische Zählerstände.";
   }
 
-  let vectorInterpretation = "";
-  if (vectorRelation === "before") {
-    vectorInterpretation = "Vector Clocks: A happened-before B.";
-  } else if (vectorRelation === "after") {
-    vectorInterpretation = "Vector Clocks: B happened-before A.";
+  let relationText = "";
+  let relationClass = "";
+
+  if (relation === "before") {
+    relationText = "A happened-before B";
+    relationClass = "state-before";
+  } else if (relation === "after") {
+    relationText = "B happened-before A";
+    relationClass = "state-after";
   } else {
-    vectorInterpretation = "Vector Clocks: A und B sind concurrent.";
+    relationText = "A und B sind concurrent";
+    relationClass = "state-concurrent";
   }
 
   compareResultDiv.innerHTML = `
-    <div class="log-item">
-      <strong>Event A:</strong> #${a.id}, Node ${a.nodeId}, ${a.type}, L=${a.lamport}, V=[${a.vector.join(",")}]
+    <div class="compare-insight">
+      <div class="compare-state ${relationClass}">${relationText}</div>
+      <div class="small" style="margin-top:6px;">${lamportText}</div>
     </div>
+
     <div class="log-item">
-      <strong>Event B:</strong> #${b.id}, Node ${b.nodeId}, ${b.type}, L=${b.lamport}, V=[${b.vector.join(",")}]
+      <strong>Event A</strong><br/>
+      #${a.id} · Node ${a.nodeId} · ${a.type}<br/>
+      <span class="small">Lamport=${a.lamport} · Vector=[${a.vector.join(",")}]</span>
     </div>
+
     <div class="log-item">
-      <strong>${lamportInterpretation}</strong><br/>
-      <strong>${vectorInterpretation}</strong><br/>
-      <span class="small">
-        Wichtig: Lamport erzeugt eine logische Ordnung, erkennt aber keine echte Konkurrenz.
-        Vector Clocks können konkurrierende Events explizit sichtbar machen.
-      </span>
+      <strong>Event B</strong><br/>
+      #${b.id} · Node ${b.nodeId} · ${b.type}<br/>
+      <span class="small">Lamport=${b.lamport} · Vector=[${b.vector.join(",")}]</span>
+    </div>
+
+    <div class="log-item">
+      <strong>Interpretation</strong><br/>
+      Lamport Clocks liefern eine logische Ordnung, aber keine sichere Erkennung von Konkurrenz.
+      Vector Clocks erlauben die Unterscheidung zwischen <code>happened-before</code> und <code>concurrent</code>.
     </div>
   `;
 }
@@ -260,15 +309,12 @@ function randomScenario() {
 
   if (action === 0) {
     const node = nodes[Math.floor(Math.random() * nodes.length)];
-    node.lamport += 1;
-    node.vector[node.id] += 1;
-    logEvent(node, "local-random");
+    doLocalEvent(node, "local-random");
   } else if (action === 1 && nodes.length > 1) {
     let fromIndex = Math.floor(Math.random() * nodes.length);
     let toIndex = Math.floor(Math.random() * nodes.length);
-    while (toIndex === fromIndex) {
-      toIndex = Math.floor(Math.random() * nodes.length);
-    }
+    while (toIndex === fromIndex) toIndex = Math.floor(Math.random() * nodes.length);
+
     const from = nodes[fromIndex];
     const to = nodes[toIndex];
 
@@ -290,6 +336,21 @@ function randomScenario() {
     deliverNextMessage();
     return;
   }
+
+  renderAll();
+}
+
+function runConcurrentEventsScenario() {
+  initialize();
+  if (nodes.length < 2) return;
+
+  doLocalEvent(nodes[0], "scenario-local");
+  doLocalEvent(nodes[1], "scenario-local");
+
+  compareResultDiv.innerHTML = explanationBanner(
+    "Concurrent Events",
+    "Node 0 und Node 1 erzeugen jeweils ein lokales Event ohne Nachrichtenaustausch. Vector Clocks erkennen diese Events als concurrent."
+  );
 
   renderAll();
 }
@@ -354,16 +415,19 @@ function handleDynamoSync() {
     node.versions = JSON.parse(JSON.stringify(merged));
   }
 
+  dynamoSummaryDiv.innerHTML = explanationBanner(
+    "Synchronisation abgeschlossen",
+    merged.length > 1
+      ? `Es existieren weiterhin ${merged.length} konkurrierende Sibling-Versionen.`
+      : "Alle Nodes sehen jetzt dieselbe dominante Version."
+  );
+
   renderAll();
 }
 
 function runDynamoConflictScenario() {
-  if (nodes.length < 2) {
-    alert("Für das Konflikt-Szenario werden mindestens 2 Nodes benötigt.");
-    return;
-  }
-
   initialize();
+  if (nodes.length < 2) return;
 
   const a = nodes[0];
   const b = nodes[1];
@@ -386,13 +450,19 @@ function runDynamoConflictScenario() {
     nodeId: b.id
   });
 
-  renderAll();
+  dynamoSummaryDiv.innerHTML = explanationBanner(
+    "Dynamo-Konflikt",
+    "Zwei Writes entstehen unabhängig voneinander. Da ihre Vector Clocks nicht vergleichbar sind, bleiben beide Versionen als concurrent siblings erhalten."
+  );
 
-  compareResultDiv.innerHTML = `
-    <div class="log-item concurrent">
-      <strong>Dynamo-Konflikt-Szenario erzeugt:</strong><br/>
-      Node 0 schreibt <code>rot</code>, Node 1 schreibt <code>blau</code> ohne gegenseitige Kenntnis.<br/>
-      Diese Versionen sind concurrent und bleiben daher zunächst als konkurrierende Versionen bestehen.
+  renderAll();
+}
+
+function explanationBanner(title, text) {
+  return `
+    <div>
+      <strong>${title}</strong><br/>
+      <span class="small">${text}</span>
     </div>
   `;
 }
@@ -405,30 +475,50 @@ function renderNodes() {
     card.className = "node-card";
 
     const versionsHtml = node.versions.length === 0
-      ? "<div class='small'>Keine Versionen gespeichert.</div>"
-      : node.versions.map(v => `
-          <div class="version-item">
-            <strong>Wert:</strong> ${v.value}<br/>
-            <span class="small">Vector=[${v.vector.join(",")}] | Node ${v.nodeId}</span>
-          </div>
-        `).join("");
+      ? `<div class="small">Keine gespeicherten Versionen.</div>`
+      : `<div class="version-group">${
+          node.versions.map(v => {
+            const colorClass = node.versions.length > 1 ? "red" : "green";
+            return `
+              <div class="version-card ${colorClass}">
+                <div class="title">Wert: <code>${escapeHtml(v.value)}</code></div>
+                <div class="small">Vector=[${v.vector.join(",")}]</div>
+                <div class="small">erstellt von Node ${v.nodeId}</div>
+              </div>
+            `;
+          }).join("")
+        }</div>`;
 
     const logHtml = node.log.length === 0
-      ? "<div class='small'>Noch keine Events.</div>"
+      ? `<div class="small">Noch keine Events.</div>`
       : [...node.log].reverse().map(event => `
           <div class="log-item">
-            <strong>#${event.id}</strong> ${event.type}<br/>
-            <span class="small">L=${event.lamport} | V=[${event.vector.join(",")}]</span>
+            <strong>#${event.id}</strong> ${escapeHtml(event.type)}<br/>
+            <span class="small">Lamport=${event.lamport} · Vector=[${event.vector.join(",")}]</span>
           </div>
         `).join("");
 
     card.innerHTML = `
-      <h3>Node ${node.id}</h3>
-      <div class="node-state"><strong>Lamport:</strong> ${node.lamport}</div>
-      <div class="node-state"><strong>Vector:</strong> [${node.vector.join(", ")}]</div>
-      <div class="node-state"><strong>Versionen:</strong></div>
+      <div class="node-head">
+        <div class="node-name">Node ${node.id}</div>
+        <div class="node-chip">aktive Replica</div>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat">
+          <div class="k">Lamport Clock</div>
+          <div class="v">${node.lamport}</div>
+        </div>
+        <div class="stat">
+          <div class="k">Vector Clock</div>
+          <div class="v">[${node.vector.join(", ")}]</div>
+        </div>
+      </div>
+
+      <div class="subhead">Dynamo-Versionen</div>
       ${versionsHtml}
-      <div class="node-state"><strong>Node-Log:</strong></div>
+
+      <div class="subhead">Node-Log</div>
       <div class="node-log">${logHtml}</div>
     `;
 
@@ -436,63 +526,268 @@ function renderNodes() {
   });
 }
 
-function renderQueue() {
-  if (networkQueue.length === 0) {
-    networkQueueDiv.innerHTML = "<div class='small'>Keine Nachrichten in der Warteschlange.</div>";
-    return;
-  }
-
-  networkQueueDiv.innerHTML = networkQueue.map(msg => `
-    <div class="queue-item">
-      <strong>Msg #${msg.id}</strong> von Node ${msg.from} an Node ${msg.to}<br/>
-      Payload: <code>${msg.payload}</code><br/>
-      <span class="small">Lamport=${msg.lamport} | Vector=[${msg.vector.join(",")}]</span>
-    </div>
-  `).join("");
-}
-
 function renderGlobalLog() {
   if (globalEventLog.length === 0) {
-    eventLogDiv.innerHTML = "<div class='small'>Noch keine Events vorhanden.</div>";
+    eventLogDiv.innerHTML = `<div class="log-item"><span class="small">Noch keine Events vorhanden.</span></div>`;
     return;
   }
 
   eventLogDiv.innerHTML = [...globalEventLog].reverse().map(event => `
     <div class="log-item">
-      <strong>#${event.id}</strong> Node ${event.nodeId} – ${event.type}<br/>
-      <span class="small">Lamport=${event.lamport} | Vector=[${event.vector.join(",")}]</span>
+      <strong>#${event.id}</strong> Node ${event.nodeId} · ${escapeHtml(event.type)}<br/>
+      <span class="small">Lamport=${event.lamport} · Vector=[${event.vector.join(",")}]</span>
     </div>
   `).join("");
 }
 
 function renderDynamoView() {
-  const allVersions = nodes.map(node => {
+  const totalVersions = nodes.reduce((sum, node) => sum + node.versions.length, 0);
+  const anyConflicts = nodes.some(node => node.versions.length > 1);
+
+  if (nodes.every(node => node.versions.length === 0)) {
+    dynamoViewDiv.innerHTML = `
+      <div class="version-card green">
+        <div class="title">Noch keine Objektversionen</div>
+        <div class="small">Führe Writes aus oder starte das Dynamo-Konflikt-Szenario.</div>
+      </div>
+    `;
+    return;
+  }
+
+  if (!dynamoSummaryDiv.innerHTML.trim()) {
+    dynamoSummaryDiv.innerHTML = explanationBanner(
+      "Aktueller Zustand",
+      anyConflicts
+        ? "Mindestens ein Node enthält mehrere Sibling-Versionen."
+        : "Der Zustand ist aktuell konfliktfrei."
+    );
+  }
+
+  dynamoViewDiv.innerHTML = nodes.map(node => {
+    const hasConflict = node.versions.length > 1;
     return `
-      <div class="log-item">
-        <strong>Node ${node.id}</strong><br/>
-        ${
-          node.versions.length === 0
-            ? "<span class='small'>Keine Versionen.</span>"
-            : node.versions.map(v =>
-                `<div class="version-item ${node.versions.length > 1 ? "concurrent" : "descendant"}">
-                  Wert: <code>${v.value}</code><br/>
-                  <span class="small">Vector=[${v.vector.join(",")}]</span>
-                 </div>`
-              ).join("")
-        }
+      <div class="node-card">
+        <div class="node-head">
+          <div class="node-name">Node ${node.id}</div>
+          <div class="node-chip">${hasConflict ? "siblings" : "single version"}</div>
+        </div>
+        <div class="small" style="margin-bottom:10px;">
+          ${hasConflict
+            ? "Mehrere konkurrierende Versionen vorhanden."
+            : "Keine Konkurrenz zwischen Versionen auf diesem Node."}
+        </div>
+        <div class="version-group">
+          ${node.versions.map(v => `
+            <div class="version-card ${hasConflict ? "red" : "green"}">
+              <div class="title">Value: <code>${escapeHtml(v.value)}</code></div>
+              <div class="small">Vector=[${v.vector.join(",")}]</div>
+              <div class="small">Origin Node ${v.nodeId}</div>
+            </div>
+          `).join("")}
+        </div>
       </div>
     `;
   }).join("");
 
-  dynamoViewDiv.innerHTML = allVersions;
+  const suffix = anyConflicts ? "Es bestehen Konflikte zwischen Versionen." : "Keine sichtbaren Konflikte.";
+  dynamoSummaryDiv.innerHTML = explanationBanner(
+    "Dynamo-Überblick",
+    `${totalVersions} gespeicherte Versionen über alle Nodes hinweg. ${suffix}`
+  );
+}
+
+function renderQueueInfo() {
+  if (networkQueue.length === 0) {
+    queueInfoDiv.innerHTML = `
+      <div class="queue-item">
+        <strong>Netzwerk-Queue leer</strong><br/>
+        <span class="small">Sende eine Nachricht oder starte ein Szenario.</span>
+      </div>
+    `;
+    return;
+  }
+
+  queueInfoDiv.innerHTML = networkQueue.map(msg => `
+    <div class="queue-item">
+      <strong>Msg #${msg.id}</strong> von Node ${msg.from} an Node ${msg.to}<br/>
+      Payload: <code>${escapeHtml(msg.payload)}</code><br/>
+      <span class="small">Lamport=${msg.lamport} · Vector=[${msg.vector.join(",")}]</span>
+    </div>
+  `).join("");
+}
+
+function renderCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = Math.max(700, Math.floor(rect.width || 1100));
+  const cssHeight = 460;
+
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  canvas.style.height = cssHeight + "px";
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  computeNodePositions();
+
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  drawBackgroundGrid(cssWidth, cssHeight);
+  drawConnections();
+  drawQueuedMessages();
+  drawNodes();
+}
+
+function drawBackgroundGrid(width, height) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(148,163,184,0.08)";
+  ctx.lineWidth = 1;
+
+  for (let x = 0; x < width; x += 40) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+  }
+
+  for (let y = 0; y < height; y += 40) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawConnections() {
+  ctx.save();
+  ctx.strokeStyle = "rgba(59,130,246,0.18)";
+  ctx.lineWidth = 1.5;
+
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      ctx.beginPath();
+      ctx.moveTo(nodes[i].position.x, nodes[i].position.y);
+      ctx.lineTo(nodes[j].position.x, nodes[j].position.y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function drawNodes() {
+  nodes.forEach(node => {
+    const { x, y } = node.position;
+
+    ctx.save();
+
+    ctx.beginPath();
+    ctx.arc(x, y, 38, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(30,64,175,0.35)";
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(x, y, 32, 0, Math.PI * 2);
+    ctx.fillStyle = "#2563eb";
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(x - 8, y - 8, 10, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fill();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 16px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(`N${node.id}`, x, y + 5);
+
+    ctx.fillStyle = "#cbd5e1";
+    ctx.font = "13px Arial";
+    ctx.fillText(`L=${node.lamport}`, x, y + 58);
+    ctx.fillText(`[${node.vector.join(",")}]`, x, y + 76);
+
+    ctx.restore();
+  });
+}
+
+function drawQueuedMessages() {
+  networkQueue.forEach((msg, index) => {
+    const from = nodes[msg.from].position;
+    const to = nodes[msg.to].position;
+
+    const t = 0.25 + (index * 0.18 % 0.5);
+    const x = from.x + (to.x - from.x) * t;
+    const y = from.y + (to.y - from.y) * t;
+
+    drawArrow(from.x, from.y, to.x, to.y, "rgba(245,158,11,0.9)");
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, 12, 0, Math.PI * 2);
+    ctx.fillStyle = "#f59e0b";
+    ctx.fill();
+
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "bold 11px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(String(msg.id), x, y + 4);
+    ctx.restore();
+  });
+}
+
+function drawArrow(x1, y1, x2, y2, color) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const angle = Math.atan2(dy, dx);
+  const nodeOffset = 36;
+
+  const startX = x1 + Math.cos(angle) * nodeOffset;
+  const startY = y1 + Math.sin(angle) * nodeOffset;
+  const endX = x2 - Math.cos(angle) * nodeOffset;
+  const endY = y2 - Math.sin(angle) * nodeOffset;
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+
+  ctx.beginPath();
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(endX, endY);
+  ctx.stroke();
+
+  const arrowSize = 10;
+  ctx.beginPath();
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(
+    endX - arrowSize * Math.cos(angle - Math.PI / 6),
+    endY - arrowSize * Math.sin(angle - Math.PI / 6)
+  );
+  ctx.lineTo(
+    endX - arrowSize * Math.cos(angle + Math.PI / 6),
+    endY - arrowSize * Math.sin(angle + Math.PI / 6)
+  );
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function renderAll() {
   renderNodes();
-  renderQueue();
   renderGlobalLog();
   renderDynamoView();
+  renderQueueInfo();
   renderCompareSelectors();
+  renderCanvas();
 }
 
 initialize();
